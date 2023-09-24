@@ -108,6 +108,6 @@ def process_dataset(dataset_records_provider):
 if __name__ == "__main__":
     # dataset_records_provider = wikidata_simplequestions("data/wikidata_simplequestion/annotated_wd_data_test_answerable.txt")
     # dataset_records_provider = apple_ml_mkqa("data/apple-ml-mkqa/mkqa.jsonl")
-    dataset_records_provider = mintaka("data/mintaka/mintaka_test.json")
-    # dataset_records_provider = debug_data()
+    # dataset_records_provider = mintaka("data/mintaka/mintaka_test.json")
+    dataset_records_provider = debug_data()
     process_dataset(dataset_records_provider)

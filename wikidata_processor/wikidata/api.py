@@ -61,7 +61,7 @@ def execute_wiki_request_with_delays(api_url, params, headers):
 def execute_sparql_request(request, api_url: str = SPARQL_API_URL):
     params = {"format": "json", "query": request}
     headers = {
-        "Accept": "application/json",
+        "Accept": "application/sparql-results+json",
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/50.0.2661.102 Safari/537.36",
     }
     logger.info(
