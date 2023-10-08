@@ -1,28 +1,13 @@
 import time
 
 import requests
+from joblib import Memory
 
-from wikidata_processor.config import MEDIAWIKI_API_URL, SPARQL_API_URL
+from wikidata_processor.config import MEDIAWIKI_API_URL, SPARQL_API_URL, CACHE_DIRECTORY
 from wikidata_processor.logger import get_logger
 
 logger = get_logger()
-
-
-def search_entity(
-        query: str,
-        max_results: int = 500,
-        language: str = "en",
-        api_url: str = MEDIAWIKI_API_URL
-):
-    headers = {
-
-    }
-    params = {
-
-    }
-    reply = requests.get(api_url, params=params, headers=headers)
-
-    print(reply)
+memory = Memory(CACHE_DIRECTORY, verbose=0)
 
 
 def execute_wiki_request_with_delays(api_url, params, headers):
@@ -58,7 +43,8 @@ def execute_wiki_request_with_delays(api_url, params, headers):
     return response
 
 
-def execute_sparql_request(request, api_url: str = SPARQL_API_URL):
+@memory.cache(ignore=['api_url'])
+def execute_sparql_request(request: str, api_url: str = SPARQL_API_URL):
     params = {"format": "json", "query": request}
     headers = {
         "Accept": "application/sparql-results+json",
@@ -69,12 +55,23 @@ def execute_sparql_request(request, api_url: str = SPARQL_API_URL):
             "msg": "Send request to Wikidata",
             "params": params,
             "endpoint": api_url,
+            "request": request
         }
     )
     response = execute_wiki_request_with_delays(api_url, params, headers)
 
     try:
-        return response.json()["results"]["bindings"]
+        response = response.json()["results"]["bindings"]
+        logger.debug(
+            {
+                "msg": "Received response from Wikidata",
+                "params": params,
+                "endpoint": api_url,
+                "request": request,
+                "response": response
+            }
+        )
+        return response
     except Exception as e:
         logger.error(
             {
