@@ -3,7 +3,11 @@ import time
 import requests
 from joblib import Memory
 
-from kgqa_signatures.config import MEDIAWIKI_API_URL, SPARQL_API_URL, CACHE_DIRECTORY
+from kgqa_signatures.config import (
+    CACHE_DIRECTORY,
+    MEDIAWIKI_API_URL,
+    SPARQL_API_URL
+)
 from kgqa_signatures.logger import get_logger
 
 logger = get_logger()

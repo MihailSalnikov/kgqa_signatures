@@ -1,8 +1,8 @@
+import datetime
+import json
 import logging
 import os
 import sys
-import json
-import datetime
 
 from kgqa_signatures.config import LOG_FILENAME
 

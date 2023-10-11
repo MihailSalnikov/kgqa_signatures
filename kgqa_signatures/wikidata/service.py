@@ -1,7 +1,7 @@
 from typing import List, Union
 
-from kgqa_signatures.wikidata.api import execute_sparql_request
 from kgqa_signatures.logger import get_logger
+from kgqa_signatures.wikidata.api import execute_sparql_request
 from kgqa_signatures.wikidata.sparql_condition import SparqlCondition
 
 logger = get_logger()
