@@ -75,7 +75,7 @@ def process_dataset(dataset_records_provider):
             record.question_entity,
             record.llm_predicted_answers_entities,
             record.llm_predicted_answers,
-            top_n_signatures=0,
+            top_n_signatures=5,
             take_all_signature_rules_with_full_match=True
         )
 

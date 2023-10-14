@@ -3,7 +3,7 @@ from typing import Dict
 
 from joblib import Parallel, delayed
 
-from kgqa_signatures.wikidata.service import get_entity_one_hop_neighbours
+from kgqa_signatures.wikidata.service import get_entity_one_hop_neighbours, count_matches
 from kgqa_signatures.wikidata.sparql_condition import SparqlCondition
 
 
@@ -68,8 +68,25 @@ def build_entity_signature(gathered_connections) -> OrderedDict:
     return signature_table
 
 
+def __score_neighbours_by_signature(question_entity_neighbours, signature_conditions, signature_condition_weights):
+    candidates = list(map(
+        lambda x: x["connected_entity"],
+        question_entity_neighbours
+    ))
+    score_table = {candidate: 0 for candidate in candidates}
+    for index, condition in enumerate(signature_conditions):
+        matches = count_matches(candidates, [condition])
+        for candidate in matches.keys():
+            score_table[candidate] += signature_condition_weights[index]
+
+    tmp_for_sort = [item for item in score_table.items()]
+    tmp_for_sort.sort(key=lambda x: x[1], reverse=True)
+    score_table = OrderedDict(tmp_for_sort)
+    return score_table
+
+
 def find_neighbour_by_signature(
-        signature_table,
+        signature_table: OrderedDict,
         question_entity,
         llm_predicted_answers_entities,
         llm_predicted_answers,
@@ -84,23 +101,39 @@ def find_neighbour_by_signature(
         if (index < top_n_signatures)
            or (take_all_signature_rules_with_full_match and item[1][1] == len(llm_predicted_answers))
     ]
+    signature_condition_weights = [
+        item[1][1]
+        for index, item in enumerate(signature_table.items())
+        # take top n records from signature table or signatures matched by all answers
+        if (index < top_n_signatures)
+           or (take_all_signature_rules_with_full_match and item[1][1] == len(llm_predicted_answers))
+    ]
     question_entity_neighbours = get_entity_one_hop_neighbours(
         question_entity,
         direct_only=True,
-        conditions=signature_conditions
+        conditions=signature_conditions,
+        match_all_conditions=False
+    )
+
+    # we don't need simple values, only entities
+    question_entity_neighbours = list(filter(
+        lambda x: x["connected_entity"].startswith("Q") or x["connected_entity"].startswith("q"),
+        question_entity_neighbours
+    ))
+
+    neighbours_score = __score_neighbours_by_signature(
+        question_entity_neighbours,
+        signature_conditions,
+        signature_condition_weights
     )
 
     # sort neighbours by signature rating and choose the best one
     answer = None
     answer_entity = None
-    for neighbour in question_entity_neighbours:
-        if not (neighbour["connected_entity"].startswith("Q") or neighbour["connected_entity"].startswith("q")):
-            # we don't need simple values, only entities
-            continue
-
-        # TODO: we just take the first one
-        if neighbour["connected_entity"] in llm_predicted_answers_entities:
-            answer_entity = neighbour["connected_entity"]
+    for neighbour, score in neighbours_score.items():
+        # we just take the first one as they are ordered by desc of signature match
+        if neighbour in llm_predicted_answers_entities:
+            answer_entity = neighbour
             answer_index = llm_predicted_answers_entities.index(answer_entity)
             answer = llm_predicted_answers[answer_index]
             break
