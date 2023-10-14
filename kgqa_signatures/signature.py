@@ -3,8 +3,8 @@ from typing import Dict
 
 from joblib import Parallel, delayed
 
-from wikidata_processor.wikidata.service import get_entity_one_hop_neighbours
-from wikidata_processor.wikidata.sparql_condition import SparqlCondition
+from kgqa_signatures.wikidata.service import get_entity_one_hop_neighbours
+from kgqa_signatures.wikidata.sparql_condition import SparqlCondition
 
 
 def __get_connections_of_entity(entity_id: str) -> Dict:

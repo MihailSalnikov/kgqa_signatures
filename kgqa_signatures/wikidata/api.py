@@ -3,8 +3,12 @@ import time
 import requests
 from joblib import Memory
 
-from wikidata_processor.config import MEDIAWIKI_API_URL, SPARQL_API_URL, CACHE_DIRECTORY
-from wikidata_processor.logger import get_logger
+from kgqa_signatures.config import (
+    CACHE_DIRECTORY,
+    MEDIAWIKI_API_URL,
+    SPARQL_API_URL
+)
+from kgqa_signatures.logger import get_logger
 
 logger = get_logger()
 memory = Memory(CACHE_DIRECTORY, verbose=0)

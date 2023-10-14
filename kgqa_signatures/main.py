@@ -1,10 +1,21 @@
 import dataclasses
+
 from sklearn.metrics import precision_score
 
-from wikidata_processor.dataset import wikidata_simplequestions, debug_data, apple_ml_mkqa, mintaka, DatasetRecord
-from wikidata_processor.signature import build_entity_signature, find_neighbour_by_signature, gather_answers_connections
-from wikidata_processor.wikidata.service import get_entity_one_hop_neighbours
-from wikidata_processor.wikidata.sparql_condition import SparqlCondition
+from kgqa_signatures.dataset import (
+    DatasetRecord,
+    apple_ml_mkqa,
+    debug_data,
+    mintaka,
+    wikidata_simplequestions
+)
+from kgqa_signatures.signature import (
+    build_entity_signature,
+    find_neighbour_by_signature,
+    gather_answers_connections
+)
+from kgqa_signatures.wikidata.service import get_entity_one_hop_neighbours
+from kgqa_signatures.wikidata.sparql_condition import SparqlCondition
 
 
 def llm(question: str):

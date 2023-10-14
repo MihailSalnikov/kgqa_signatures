@@ -1,10 +1,10 @@
+import datetime
+import json
 import logging
 import os
 import sys
-import json
-import datetime
 
-from wikidata_processor.config import LOG_FILENAME
+from kgqa_signatures.config import LOG_FILENAME
 
 
 class JSONFormatter(logging.Formatter):
