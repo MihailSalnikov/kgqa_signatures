@@ -32,7 +32,7 @@ class JSONFormatter(logging.Formatter):
 
 logFormatter = logging.Formatter("%(asctime)s [%(levelname)s]: %(message)s")
 main_logger = logging.getLogger("main")
-main_logger.setLevel(logging.WARNING)
+main_logger.setLevel(logging.INFO)
 
 fileHandler = logging.FileHandler(LOG_FILENAME)
 fileHandler.setFormatter(JSONFormatter())
@@ -41,6 +41,7 @@ main_logger.addHandler(fileHandler)
 
 consoleHandler = logging.StreamHandler(sys.stdout)
 consoleHandler.setFormatter(logFormatter)
+consoleHandler.setLevel(logging.INFO)
 main_logger.addHandler(consoleHandler)
 
 

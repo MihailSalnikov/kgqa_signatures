@@ -1,6 +1,8 @@
 import dataclasses
+from sklearn.metrics import precision_score
 
 from wikidata_processor.dataset import wikidata_simplequestions, debug_data, apple_ml_mkqa, mintaka, DatasetRecord
+from wikidata_processor.signature import build_entity_signature, find_neighbour_by_signature, gather_answers_connections
 from wikidata_processor.wikidata.service import get_entity_one_hop_neighbours
 from wikidata_processor.wikidata.sparql_condition import SparqlCondition
 
@@ -30,6 +32,9 @@ def entity_linker_question(sentence_with_entity: str):
 
 
 def process_dataset(dataset_records_provider):
+    gt_answers_entities = []
+    estimated_answers_entities = []
+
     for record in dataset_records_provider:
         # Step 0: some datasets don't provide entity for question, so we detect it ourselves
         if record.question_entity is None:
@@ -37,77 +42,49 @@ def process_dataset(dataset_records_provider):
             record = dataclasses.replace(record, question_entity=question_entity)
 
         # Step 1: infer LLM to produce answer variants
-        answers = llm(record.question)
+        if record.llm_predicted_answers is None or record.llm_predicted_answers_entities is None:
+            answers = llm(record.question)
+            answers_entities = entity_linker_answers(answers)
+            record = dataclasses.replace(
+                record,
+                llm_predicted_answers=answers,
+                llm_predicted_answers_entities=answers_entities
+            )
 
-        # Step 2: search entity in text by entity linker
-        answers_entities = entity_linker_answers(answers)
-
-        # Step 3: gather neighbours and connections of entities from all answers to common table
+        # Step 2: gather neighbours and connections of entities from all answers to common table
         # TODO: SPARSQL returns the last object connected with from list (for example city with many head of governments)
-        gathered_connections = {}
-        for entity_id in answers_entities:
-            entity_neighbours = get_entity_one_hop_neighbours(entity_id)
-            for neighbour in entity_neighbours:
-                connection_property = neighbour["connection_property"]
-                connected_entity = neighbour["connected_entity"]
-                if connection_property not in gathered_connections:
-                    gathered_connections[connection_property] = {}
+        gathered_connections = gather_answers_connections(record.llm_predicted_answers_entities)
 
-                if connected_entity in gathered_connections[connection_property]:
-                    gathered_connections[connection_property][connected_entity] += 1
-                else:
-                    gathered_connections[connection_property][connected_entity] = 1
+        # Step 3: build signature of good entity
+        signature_table = build_entity_signature(gathered_connections)
 
-        # Step 4: build signature of good entity
-        signature_table = {}
-        for connection_property, connected_items in gathered_connections.items():
-            best_connected_entity = None
-            best_connected_entity_count = 0
-            for connected_entity, amount in connected_items.items():
-                if best_connected_entity_count < amount:
-                    best_connected_entity = connected_entity
-                    best_connected_entity_count = amount
-
-            if best_connected_entity_count < len(answers_entities):
-                continue
-
-            signature_table[connection_property] = (best_connected_entity, best_connected_entity_count)
-
-        # Step 5: search entity in question by entity linker
-        entity_from_question = record.question_entity
-
-        # Step 6: get all neighbours of entity with signature
-        signature_conditions = [
-            SparqlCondition(connection=connection, destination=entity[0], union_with_invert=True)
-            for connection, entity in signature_table.items()
-            if entity[0].startswith("Q") or entity[0].startswith("q")  # TODO: we ignore real value entities
-        ]
-        question_entity_neighbours = get_entity_one_hop_neighbours(
-            entity_from_question,
-            direct_only=True,
-            conditions=signature_conditions
+        # Step 4: get best neighbour by signature
+        answer, answer_entity = find_neighbour_by_signature(
+            signature_table,
+            record.question_entity,
+            record.llm_predicted_answers_entities,
+            record.llm_predicted_answers,
+            top_n_signatures=0,
+            take_all_signature_rules_with_full_match=True
         )
 
-        # Step 7: sort neighbours by signature rating and choose the best one
-        answer = None
-        for neighbour in question_entity_neighbours:
-            if not (neighbour["connected_entity"].startswith("Q") or neighbour["connected_entity"].startswith("q")):
-                # we don't need simple values, only entities
-                continue
+        # Step 5: check answer
+        gt_answers_entities.append(record.answer_entity)
+        estimated_answers_entities.append(answer_entity)
+        is_correct = answer_entity == record.answer_entity
+        print(f"Question: {record.question} Answer: {answer} Answer_entity: {answer_entity}"
+              f" Is correct: {is_correct} Correct answer_entity: {record.answer_entity}")
 
-            # TODO: we just take the first one
-            if neighbour["connected_entity"] in answers_entities:
-                answer = neighbour["connected_entity"]
-                break
-
-        # Step 8: check answer
-        is_correct = answer == record.answer_entity
-        print(f"Question: {record.question} Answer: {answer} Is correct: {is_correct} Correct answer: {record.answer_entity}")
+    return precision_score(gt_answers_entities, estimated_answers_entities, average='micro')
 
 
 if __name__ == "__main__":
-    # dataset_records_provider = wikidata_simplequestions("data/wikidata_simplequestion/annotated_wd_data_test_answerable.txt")
+    # dataset_records_provider = wikidata_simplequestions(
+    #     filepath="data/wikidata_simplequestion/annotated_wd_data_valid_answerable.txt",
+    #     llm_answers_filepath="data/wikidata_simplequestion/llm_result/sqwd_results_validation_with_el.jsonl"
+    # )
     # dataset_records_provider = apple_ml_mkqa("data/apple-ml-mkqa/mkqa.jsonl")
     # dataset_records_provider = mintaka("data/mintaka/mintaka_test.json")
     dataset_records_provider = debug_data()
-    process_dataset(dataset_records_provider)
+    precision = process_dataset(dataset_records_provider)
+    print(f"Precision: {precision}")
