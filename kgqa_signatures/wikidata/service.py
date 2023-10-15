@@ -26,12 +26,16 @@ def get_entity_one_hop_neighbours(
     join_symbol = "\n" if match_all_conditions else " UNION "
     rendered_conditions = join_symbol.join(conditions)
 
+    # when entity or property is the root of relation
+    # it is depicted here as Qxxx-xxxx-xxx or Pxxx-xxx-xxx instead of Qxxx or Pxxx
+    # also we skip all not entity objects by rule '?object wdt:P31 ?smth.'
     sparql_query_all = """
 PREFIX wdt: <http://www.wikidata.org/prop/direct/>
 PREFIX wd: <http://www.wikidata.org/entity/>
 SELECT DISTINCT ?property ?object
 WHERE {
     {?object ?property wd:<ENTITY>} UNION {wd:<ENTITY> ?property ?object}.
+    ?object wdt:P31 ?smth.
     <CONDITIONS>
 }
     """.replace("<ENTITY>", entity_id).replace("<CONDITIONS>", rendered_conditions)
@@ -41,6 +45,7 @@ PREFIX wd: <http://www.wikidata.org/entity/>
 SELECT DISTINCT ?property ?object
 WHERE {
     wd:<ENTITY> ?property ?object.
+    ?object wdt:P31 ?smth.
     <CONDITIONS>
 }
     """.replace("<ENTITY>", entity_id).replace("<CONDITIONS>", rendered_conditions)
@@ -50,25 +55,12 @@ WHERE {
     parsed_result = []
     for item in result:
         connection_property = item["property"]["value"]
-        connection_property = connection_property.split("/")[-1]
-
-        if not connection_property.startswith("P"):
-            # TODO: filter in SPARQL query somehow --- some extra info is here
-            continue
+        connection_property = connection_property[connection_property.rfind('/') + 1:]
 
         connected_entity = item["object"]["value"]
-        connected_entity = connected_entity.split("/")[-1]
-        # when entity or property is the root of relation
-        # it is depicted here as Qxxx-xxxx-xxx or Pxxx-xxx-xxx instead of Qxxx or Pxxx
-        if (connected_entity.startswith("Q") or connected_entity.startswith("q") or connected_entity.startswith(
-                "P") or connected_entity.startswith("p")) and "-" in connected_entity:
-            # TODO: it is connection from qualifier -- skip for now, but maybe need later
-            continue
+        connected_entity = connected_entity[connected_entity.rfind('/') + 1:]
 
-        parsed_result.append({
-            "connected_entity": connected_entity,
-            "connection_property": connection_property
-        })
+        parsed_result.append((connection_property, connected_entity))
 
     return parsed_result
 

@@ -8,26 +8,9 @@ from kgqa_signatures.wikidata.service import get_entity_one_hop_neighbours, coun
 from kgqa_signatures.wikidata.sparql_condition import SparqlCondition
 
 
-def __get_connections_of_entity(entity_id: str) -> Dict:
-    gathered_connections = {}
-    entity_neighbours = get_entity_one_hop_neighbours(entity_id)
-    for neighbour in entity_neighbours:
-        connection_property = neighbour["connection_property"]
-        connected_entity = neighbour["connected_entity"]
-        if connection_property not in gathered_connections:
-            gathered_connections[connection_property] = {}
-
-        if connected_entity in gathered_connections[connection_property]:
-            gathered_connections[connection_property][connected_entity] += 1
-        else:
-            gathered_connections[connection_property][connected_entity] = 1
-
-    return gathered_connections
-
-
 def __connections_gatherer_single(llm_predicted_answers_entities):
     for entity_id in llm_predicted_answers_entities:
-        yield __get_connections_of_entity(entity_id)
+        yield get_entity_one_hop_neighbours(entity_id)
 
 
 def gather_answers_connections(llm_predicted_answers_entities, n_jobs=4) -> Dict:
@@ -36,20 +19,19 @@ def gather_answers_connections(llm_predicted_answers_entities, n_jobs=4) -> Dict
     if not DISABLE_PARALLEL:
         parallel = Parallel(n_jobs=n_jobs)
         connections_gatherer = parallel(
-            delayed(__get_connections_of_entity)(entity_id) for entity_id in llm_predicted_answers_entities
+            delayed(get_entity_one_hop_neighbours)(entity_id) for entity_id in llm_predicted_answers_entities
         )
     else:
         connections_gatherer = __connections_gatherer_single(llm_predicted_answers_entities)
 
     for connections in connections_gatherer:
-        for connection_property, connected_entities in connections.items():
+        for connection_property, connected_entity in connections:
             if connection_property not in gathered_connections:
                 gathered_connections[connection_property] = {}
-            for connected_entity, connections_amount in connected_entities.items():
-                if connected_entity in gathered_connections[connection_property]:
-                    gathered_connections[connection_property][connected_entity] += connections_amount
-                else:
-                    gathered_connections[connection_property][connected_entity] = connections_amount
+            if connected_entity in gathered_connections[connection_property]:
+                gathered_connections[connection_property][connected_entity] += 1
+            else:
+                gathered_connections[connection_property][connected_entity] = 1
 
     return gathered_connections
 
@@ -72,7 +54,7 @@ def build_entity_signature(gathered_connections) -> OrderedDict:
 
     # Sort connections in signature
     tmp_for_sort = [item for item in signature_table.items()]
-    tmp_for_sort.sort(key=lambda x: x[1][1], reverse=True)
+    tmp_for_sort.sort(key=lambda x: (x[1][1], x[0]), reverse=True)
     signature_table = OrderedDict(tmp_for_sort)
 
     return signature_table
@@ -80,7 +62,7 @@ def build_entity_signature(gathered_connections) -> OrderedDict:
 
 def __score_neighbours_by_signature(question_entity_neighbours, signature_conditions, signature_condition_weights):
     candidates = list(map(
-        lambda x: x["connected_entity"],
+        lambda x: x[1],
         question_entity_neighbours
     ))
     score_table = {candidate: 0 for candidate in candidates}
@@ -119,16 +101,10 @@ def find_neighbour_by_signature(
     ]
     question_entity_neighbours = get_entity_one_hop_neighbours(
         question_entity,
-        direct_only=True,
+        direct_only=False,
         conditions=signature_conditions,
         match_all_conditions=False
     )
-
-    # we don't need simple values, only entities
-    question_entity_neighbours = list(filter(
-        lambda x: x["connected_entity"].startswith("Q") or x["connected_entity"].startswith("q"),
-        question_entity_neighbours
-    ))
 
     neighbours_score = __score_neighbours_by_signature(
         question_entity_neighbours,

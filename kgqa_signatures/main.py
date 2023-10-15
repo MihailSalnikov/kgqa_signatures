@@ -48,9 +48,6 @@ def process_dataset(dataset_records_provider):
     estimated_answers_entities = []
 
     for index, record in enumerate(dataset_records_provider):
-        if index > 5:
-            break
-
         start_time = time.time()
         # Step 0: some datasets don't provide entity for question, so we detect it ourselves
         if record.question_entity is None:
@@ -96,14 +93,14 @@ def process_dataset(dataset_records_provider):
 
 
 if __name__ == "__main__":
-    dataset_records_provider = wikidata_simplequestions(
-        filepath="data/wikidata_simplequestion/annotated_wd_data_valid_answerable.txt",
-        llm_answers_filepath="data/wikidata_simplequestion/llm_result/t5xlssmnq_results_validation_linked.jsonl"
-    )
+    # dataset_records_provider = wikidata_simplequestions(
+    #     filepath="data/wikidata_simplequestion/annotated_wd_data_valid_answerable.txt",
+    #     llm_answers_filepath="data/wikidata_simplequestion/llm_result/t5xlssmnq_results_validation_linked.jsonl"
+    # )
     # dataset_records_provider = apple_ml_mkqa("data/apple-ml-mkqa/mkqa.jsonl")
     # dataset_records_provider = mintaka("data/mintaka/mintaka_test.json")
     start_time = time.time()
-    # dataset_records_provider = debug_data()
+    dataset_records_provider = debug_data()
     precision = process_dataset(dataset_records_provider)
     end_time = time.time()
     print(f"Precision: {precision}")
