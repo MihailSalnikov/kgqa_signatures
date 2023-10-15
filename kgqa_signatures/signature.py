@@ -3,6 +3,7 @@ from typing import Dict
 
 from joblib import Parallel, delayed
 
+from kgqa_signatures.config import DISABLE_PARALLEL
 from kgqa_signatures.wikidata.service import get_entity_one_hop_neighbours, count_matches
 from kgqa_signatures.wikidata.sparql_condition import SparqlCondition
 
@@ -24,13 +25,22 @@ def __get_connections_of_entity(entity_id: str) -> Dict:
     return gathered_connections
 
 
+def __connections_gatherer_single(llm_predicted_answers_entities):
+    for entity_id in llm_predicted_answers_entities:
+        yield __get_connections_of_entity(entity_id)
+
+
 def gather_answers_connections(llm_predicted_answers_entities, n_jobs=4) -> Dict:
     gathered_connections = {}
-    parallel = Parallel(n_jobs=n_jobs)
 
-    connections_gatherer = parallel(
-        delayed(__get_connections_of_entity)(entity_id) for entity_id in llm_predicted_answers_entities
-    )
+    if not DISABLE_PARALLEL:
+        parallel = Parallel(n_jobs=n_jobs)
+        connections_gatherer = parallel(
+            delayed(__get_connections_of_entity)(entity_id) for entity_id in llm_predicted_answers_entities
+        )
+    else:
+        connections_gatherer = __connections_gatherer_single(llm_predicted_answers_entities)
+
     for connections in connections_gatherer:
         for connection_property, connected_entities in connections.items():
             if connection_property not in gathered_connections:
@@ -89,7 +99,6 @@ def find_neighbour_by_signature(
         signature_table: OrderedDict,
         question_entity,
         llm_predicted_answers_entities,
-        llm_predicted_answers,
         top_n_signatures=0,
         take_all_signature_rules_with_full_match=True,
 ):
@@ -99,14 +108,14 @@ def find_neighbour_by_signature(
         for index, item in enumerate(signature_table.items())
         # take top n records from signature table or signatures matched by all answers
         if (index < top_n_signatures)
-           or (take_all_signature_rules_with_full_match and item[1][1] == len(llm_predicted_answers))
+           or (take_all_signature_rules_with_full_match and item[1][1] == len(llm_predicted_answers_entities))
     ]
     signature_condition_weights = [
         item[1][1]
         for index, item in enumerate(signature_table.items())
         # take top n records from signature table or signatures matched by all answers
         if (index < top_n_signatures)
-           or (take_all_signature_rules_with_full_match and item[1][1] == len(llm_predicted_answers))
+           or (take_all_signature_rules_with_full_match and item[1][1] == len(llm_predicted_answers_entities))
     ]
     question_entity_neighbours = get_entity_one_hop_neighbours(
         question_entity,
@@ -128,14 +137,10 @@ def find_neighbour_by_signature(
     )
 
     # sort neighbours by signature rating and choose the best one
-    answer = None
-    answer_entity = None
+    answer_entity = "Q0"  # not existing entity -- None is restricted because of precision calculation
     for neighbour, score in neighbours_score.items():
         # we just take the first one as they are ordered by desc of signature match
-        if neighbour in llm_predicted_answers_entities:
-            answer_entity = neighbour
-            answer_index = llm_predicted_answers_entities.index(answer_entity)
-            answer = llm_predicted_answers[answer_index]
-            break
+        answer_entity = neighbour
+        break
 
-    return answer, answer_entity
+    return answer_entity

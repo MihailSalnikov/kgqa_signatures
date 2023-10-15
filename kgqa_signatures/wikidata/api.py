@@ -9,9 +9,10 @@ from kgqa_signatures.config import (
     SPARQL_API_URL
 )
 from kgqa_signatures.logger import get_logger
+from kgqa_signatures.utils.joblib_memory_cache_backend import FileSystemStoreBackendNoNumpy
 
 logger = get_logger()
-memory = Memory(CACHE_DIRECTORY, verbose=0)
+memory = Memory(CACHE_DIRECTORY, verbose=0, backend=FileSystemStoreBackendNoNumpy.NAME)
 
 
 def execute_wiki_request_with_delays(api_url, params, headers):
