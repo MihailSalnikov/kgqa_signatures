@@ -52,6 +52,15 @@ WHERE {
     sparql_query = sparql_query_direct if direct_only else sparql_query_all
     result = execute_sparql_request(sparql_query)
 
+    if result is None:
+        logger.error(
+            {
+                "msg": "cached request was with error",
+                "query": sparql_query,
+            }
+        )
+        return {}
+
     parsed_result = []
     for item in result:
         connection_property = item["property"]["value"]
@@ -91,6 +100,16 @@ WHERE {
 GROUP BY ?object""".replace("<CONDITIONS>", rendered_conditions).replace("<CANDIDATES>", rendered_candidates)
 
     result = execute_sparql_request(sparql_query)
+
+    if result is None:
+        logger.error(
+            {
+                "msg": "cached request was with error",
+                "query": sparql_query,
+            }
+        )
+        return {}
+
     parsed_result = {}
     for item in result:
         matches_count = int(item['matched']['value'])
