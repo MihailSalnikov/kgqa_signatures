@@ -1,7 +1,9 @@
 import time
+from http.client import RemoteDisconnected
 
 import requests
 from joblib import Memory
+from urllib3.exceptions import ProtocolError
 
 from kgqa_signatures.config import (
     CACHE_DIRECTORY,
@@ -9,9 +11,10 @@ from kgqa_signatures.config import (
     SPARQL_API_URL
 )
 from kgqa_signatures.logger import get_logger
+from kgqa_signatures.utils.joblib_memory_cache_backend import FileSystemStoreBackendNoNumpy
 
 logger = get_logger()
-memory = Memory(CACHE_DIRECTORY, verbose=0)
+memory = Memory(CACHE_DIRECTORY, verbose=0, backend=FileSystemStoreBackendNoNumpy.NAME)
 
 
 def execute_wiki_request_with_delays(api_url, params, headers):
@@ -62,7 +65,17 @@ def execute_sparql_request(request: str, api_url: str = SPARQL_API_URL):
             "request": request
         }
     )
-    response = execute_wiki_request_with_delays(api_url, params, headers)
+    try:
+        response = execute_wiki_request_with_delays(api_url, params, headers)
+    except (ProtocolError, RemoteDisconnected, requests.exceptions.ConnectionError) as e:
+        logger.error(
+            {
+                "msg": str(e),
+                "request": request,
+                "endpoint": api_url,
+            }
+        )
+        return None
 
     try:
         response = response.json()["results"]["bindings"]
