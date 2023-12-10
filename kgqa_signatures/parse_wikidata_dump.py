@@ -4,6 +4,7 @@ script to parse the wikidata dump
 """
 import argparse
 import bz2
+import gzip
 import multiprocessing as mp
 import os
 import pickle
@@ -17,18 +18,17 @@ import pydash
 import ujson
 from tqdm import tqdm
 
-
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "--data_path",
-    default="/workspace/storage/latest-all.json.bz2",
+    default="latest-all.json.gz",
     type=str,
     help="choose the path for the wikidata dump graph (json.bz2)",
 )
 
 parser.add_argument(
     "--save_path",
-    default="/workspace/storage/wikidata_igraph_v3_test",
+    default="wikidata_dump_repack",
     type=str,
     help="choose the path to save the parse rdf triple txt of our graph",
 )
@@ -38,7 +38,8 @@ def load_bz(data_path_bz2, lines_skip):
     """
     parse bz file, yield 1 record at a time
     """
-    with bz2.open(data_path_bz2, mode="rt") as file:
+    # with bz2.open(data_path_bz2, mode="rt") as file:
+    with gzip.open(data_path_bz2, mode="rt") as file:
         file.read(2)  # skip first two bytes: "{\n"
         for idx, line in enumerate(itertools.islice(file, lines_skip, None)):
             yield idx, line
@@ -71,23 +72,23 @@ def worker(save_dir, json_dump, idx, line, queue):
 
         rdf_triples = ""
         entity1 = pydash.get(record, "id")
+        entity_label = pydash.get(record, "labels.en.value").replace(" ", "<space-replaced>")
+        rdf_triples += f"{entity1[1:]}\t{entity_label}\t-1\n"
 
         # each key is the relationship between entity1 and 2
         for key in pydash.get(record, "claims").keys():
             for connected_entity_record in pydash.get(record, f"claims.{key}"):
-                if pydash.has(connected_entity_record, "mainsnak.datavalue.type"):
-                    if (
-                        pydash.get(connected_entity_record, "mainsnak.datavalue.type")
-                        == "wikibase-entityid"
-                    ):
-                        entity2 = pydash.get(
-                            connected_entity_record, "mainsnak.datavalue.value.id"
-                        )
-                        # not including the Q and P
-                        rdf_triples += f"{entity1[1:]}\t{entity2[1:]}\t{key[1:]}\n"
+                if pydash.get(connected_entity_record, "mainsnak.datavalue.type") == "wikibase-entityid":
+                    entity2 = pydash.get(
+                        connected_entity_record, "mainsnak.datavalue.value.id"
+                    )
+                    # not including the Q and P
+                    rdf_triples += f"{entity1[1:]}\t{entity2[1:]}\t{key[1:]}\n"
         queue.put((idx, rdf_triples))
 
-    except ujson.JSONDecodeError:
+    except ujson.JSONDecodeError as e:
+        print(f"Error idx: {idx}")
+        print(e)
         pass
 
 
@@ -96,18 +97,29 @@ def init_worker():
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 
-def listener(save_dir, queue, lines_skipped):
+def listener(save_dir, queue, response_queue, lines_skipped):
     """
     listens for messages on our queue, write to the result file
     """
     output = f"{save_dir}/wikidata_triples.txt"
     checkpoint = f"{save_dir}/checkpoint.txt"
+    last_written_entity = None
     with open(output, "a+", encoding="utf-8") as file:
         while True:
             idx, msg = queue.get()
             if msg == "kill":
+                response_queue.put(f"KILL done: last written entity: {last_written_entity}")
                 break
+            if msg == "kp":
+                with open(checkpoint, "w", encoding="utf-8") as check_f:
+                    check_f.write(f"{str(idx + lines_skipped)}\n{last_written_entity}")
+                response_queue.put(
+                    f"KP done: next part starts with idx: {idx + lines_skipped}, last written entity: {last_written_entity}")
+                continue
             try:
+                space_index = msg.find("\t")
+                if space_index != -1:
+                    last_written_entity = msg[:space_index]
                 file.write(str(msg))
                 file.flush()
             except KeyboardInterrupt:
@@ -118,14 +130,28 @@ def listener(save_dir, queue, lines_skipped):
                 except SystemExit:
                     os._exit(130)  # pylint: disable=W0212
 
-            if idx > 0 and idx % 1000 == 0:
-                with open(checkpoint, "w+", encoding="utf-8") as check_f:
-                    check_f.write(str(idx + lines_skipped))
-
 
 def main():
     """main function"""
     args = parser.parse_args()
+
+    # with gzip.open(args.data_path, mode="rt") as file:
+    #     for i in range(2):
+    #         line = file.readline()
+    #         if i == 0:
+    #             continue
+    #         line = ujson.loads(line.rstrip(",\n"))
+
+    #         first_conn = list(pydash.get(line, "claims").keys())[1]
+    #         print(first_conn)
+    #         tmp = pydash.get(line, f"claims.{first_conn}")[0]
+    #         tmp2 = pydash.get(tmp, "mainsnak.datatype")
+
+    #         entity_label = pydash.get(line, "labels.en.value")
+    #         print(entity_label)
+
+    # return
+
     checkpoint = f"{args.save_path}/checkpoint.txt"
     Path(args.save_path).mkdir(parents=True, exist_ok=True)
 
@@ -133,6 +159,7 @@ def main():
     # creating maner and queue
     manager = mp.Manager()
     task_queue = manager.Queue(number_of_processes * 4)
+    listener_response_queue = manager.Queue(1)
 
     # for checkpoint
     lines_skipped = 0
@@ -143,27 +170,44 @@ def main():
     print(f"Skip {lines_skipped} lines because of checkpoint")
 
     with mp.Pool(1, init_worker) as writing_pool:
-        writing_pool.apply_async(listener, (args.save_path, task_queue, lines_skipped))
+        writing_pool.apply_async(listener, (args.save_path, task_queue, listener_response_queue, lines_skipped))
 
+        kp_amount = 10000
         with mp.Pool(number_of_processes, init_worker) as pool:
             try:
                 # firing our workers to parse the record
                 start = time.time()
                 last_idx = None
+                asyncs = []
                 for idx, line in tqdm(load_bz(args.data_path, lines_skipped)):
-                    pool.apply_async(
+                    if idx > 0 and idx % kp_amount == 0:
+                        for res in asyncs:
+                            res.wait()
+                        asyncs = []
+                        task_queue.put((idx, "kp"))
+                        kp_description = listener_response_queue.get()
+                        print(kp_description)
+
+                    res = pool.apply_async(
                         worker,
                         (args.save_path, False, idx, line, task_queue),
                     )
+                    asyncs.append(res)
+                    last_idx = idx
+                    # if idx > 35:
+                    #     break
+                # print(idx)
+
+                for res in asyncs:
+                    res.wait()
+                pool.close()
+                task_queue.put((-1, "kill"))
+                kill_description = listener_response_queue.get()
+                print(kill_description)
+                writing_pool.close()
 
                 end = time.time()
-                print(f"time took {end-start}, total number of records: {last_idx}")
-
-                # now we are done, kill the listener
-                task_queue.put((-1, "kill"))
-
-                while not task_queue.empty():
-                    pass
+                print(f"time took {end - start}, total number of records: {last_idx + 1}")
             except KeyboardInterrupt:
                 print("Exiting from main pool early!")
                 # terminate and joining since we are interrupting
