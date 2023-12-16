@@ -64,6 +64,9 @@ def worker(save_dir, json_dump, idx, line, queue):
     put on the queue
     """
     try:
+        # first or last line in file
+        if line == "" or line == "\n" or line[0] in ("]", "["):
+            return
         record = ujson.loads(line.rstrip(",\n"))
 
         if json_dump:
@@ -73,7 +76,8 @@ def worker(save_dir, json_dump, idx, line, queue):
         rdf_triples = ""
         entity1 = pydash.get(record, "id")
         entity_label = pydash.get(record, "labels.en.value").replace(" ", "<space-replaced>")
-        rdf_triples += f"{entity1[1:]}\t{entity_label}\t-1\n"
+        lgl = f"\n#\t{entity1}"
+        lgl += f"\n{entity_label}\t-1"
 
         # each key is the relationship between entity1 and 2
         for key in pydash.get(record, "claims").keys():
@@ -84,11 +88,19 @@ def worker(save_dir, json_dump, idx, line, queue):
                     )
                     # not including the Q and P
                     rdf_triples += f"{entity1[1:]}\t{entity2[1:]}\t{key[1:]}\n"
-        queue.put((idx, rdf_triples))
+                    lgl += f"\n{entity2[1:]}\t{key[1:]}"
+
+        msg = {
+            "triples": rdf_triples,
+            "labels": f"{entity1[1:]}\t{entity_label}\n",
+            "lgl": lgl,
+        }
+        queue.put((idx, msg))
 
     except ujson.JSONDecodeError as e:
         print(f"Error idx: {idx}")
         print(e)
+        print(line)
         pass
 
 
@@ -101,34 +113,44 @@ def listener(save_dir, queue, response_queue, lines_skipped):
     """
     listens for messages on our queue, write to the result file
     """
-    output = f"{save_dir}/wikidata_triples.txt"
+    output_triples = f"{save_dir}/wikidata_triples.txt"
+    output_labels = f"{save_dir}/wikidata_triples_labels.txt"
+    output_lgl = f"{save_dir}/wikidata_lgl.txt"
     checkpoint = f"{save_dir}/checkpoint.txt"
     last_written_entity = None
-    with open(output, "a+", encoding="utf-8") as file:
-        while True:
-            idx, msg = queue.get()
-            if msg == "kill":
-                response_queue.put(f"KILL done: last written entity: {last_written_entity}")
-                break
-            if msg == "kp":
-                with open(checkpoint, "w", encoding="utf-8") as check_f:
-                    check_f.write(f"{str(idx + lines_skipped)}\n{last_written_entity}")
-                response_queue.put(
-                    f"KP done: next part starts with idx: {idx + lines_skipped}, last written entity: {last_written_entity}")
-                continue
-            try:
-                space_index = msg.find("\t")
-                if space_index != -1:
-                    last_written_entity = msg[:space_index]
-                file.write(str(msg))
-                file.flush()
-            except KeyboardInterrupt:
-                print("Exiting from parsing early while in writer!")
-                file.flush()
-                try:
-                    sys.exit(130)
-                except SystemExit:
-                    os._exit(130)  # pylint: disable=W0212
+    with open(output_triples, "a+", encoding="utf-8") as file_triples:
+        with open(output_labels, "a+", encoding="utf-8") as file_labels:
+            with open(output_lgl, "a+", encoding="utf-8") as file_lgl:
+                while True:
+                    idx, msg = queue.get()
+                    if msg == "kill":
+                        response_queue.put(f"KILL done: last written entity: {last_written_entity}")
+                        break
+                    if msg == "kp":
+                        with open(checkpoint, "w", encoding="utf-8") as check_f:
+                            check_f.write(f"{str(idx + lines_skipped)}\n{last_written_entity}")
+                        response_queue.put(
+                            f"KP done: next part starts with idx: {idx + lines_skipped}, last written entity: {last_written_entity}")
+                        continue
+                    try:
+                        space_index = msg["triples"].find("\t")
+                        if space_index != -1:
+                            last_written_entity = msg["triples"][:space_index]
+                        file_triples.write(str(msg["triples"]))
+                        file_triples.flush()
+                        file_labels.write(str(msg["labels"]))
+                        file_labels.flush()
+                        file_lgl.write(str(msg["lgl"]))
+                        file_lgl.flush()
+                    except KeyboardInterrupt:
+                        print("Exiting from parsing early while in writer!")
+                        file_triples.flush()
+                        file_labels.flush()
+                        file_lgl.flush()
+                        try:
+                            sys.exit(130)
+                        except SystemExit:
+                            os._exit(130)  # pylint: disable=W0212
 
 
 def main():
@@ -194,7 +216,7 @@ def main():
                     )
                     asyncs.append(res)
                     last_idx = idx
-                    # if idx > 35:
+                    # if idx > 3:
                     #     break
                 # print(idx)
 
