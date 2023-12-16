@@ -4,25 +4,26 @@ from typing import Dict
 from joblib import Parallel, delayed
 
 from kgqa_signatures.config import DISABLE_PARALLEL
-from kgqa_signatures.wikidata.service import get_entity_one_hop_neighbours, count_matches
+from kgqa_signatures.wikidata.abstract_service import AbstractService
+from kgqa_signatures.wikidata.service_igraph import IGraphService
 from kgqa_signatures.wikidata.sparql_condition import SparqlCondition
 
 
-def __connections_gatherer_single(llm_predicted_answers_entities):
+def __connections_gatherer_single(service, llm_predicted_answers_entities):
     for entity_id in llm_predicted_answers_entities:
-        yield get_entity_one_hop_neighbours(entity_id)
+        yield service.get_entity_one_hop_neighbours(entity_id)
 
 
-def gather_answers_connections(llm_predicted_answers_entities, n_jobs=4) -> Dict:
+def gather_answers_connections(service, llm_predicted_answers_entities, n_jobs=4) -> Dict:
     gathered_connections = {}
 
-    if not DISABLE_PARALLEL:
+    if not DISABLE_PARALLEL and not isinstance(service, IGraphService):
         parallel = Parallel(n_jobs=n_jobs)
         connections_gatherer = parallel(
-            delayed(get_entity_one_hop_neighbours)(entity_id) for entity_id in llm_predicted_answers_entities
+            delayed(service.get_entity_one_hop_neighbours)(entity_id) for entity_id in llm_predicted_answers_entities
         )
     else:
-        connections_gatherer = __connections_gatherer_single(llm_predicted_answers_entities)
+        connections_gatherer = __connections_gatherer_single(service, llm_predicted_answers_entities)
 
     for connections in connections_gatherer:
         for connection_property, connected_entity in connections:
@@ -60,15 +61,17 @@ def build_entity_signature(gathered_connections) -> OrderedDict:
     return signature_table
 
 
-def __score_neighbours_by_signature(question_entity_neighbours, signature_conditions, signature_condition_weights):
+def __score_neighbours_by_signature(service, question_entity_neighbours, signature_conditions, signature_condition_weights):
     candidates = list(map(
         lambda x: x[1],
         question_entity_neighbours
     ))
     score_table = {candidate: 0 for candidate in candidates}
     for index, condition in enumerate(signature_conditions):
-        matches = count_matches(candidates, [condition])
-        for candidate in matches.keys():
+        matches = service.count_matches(candidates, [condition])
+        for candidate, is_match in matches.items():
+            if is_match == 0:
+                continue
             score_table[candidate] += signature_condition_weights[index]
 
     tmp_for_sort = [item for item in score_table.items()]
@@ -78,6 +81,7 @@ def __score_neighbours_by_signature(question_entity_neighbours, signature_condit
 
 
 def find_neighbour_by_signature(
+        service: AbstractService,
         signature_table: OrderedDict,
         question_entity,
         llm_predicted_answers_entities,
@@ -99,7 +103,7 @@ def find_neighbour_by_signature(
         if (index < top_n_signatures)
            or (take_all_signature_rules_with_full_match and item[1][1] == len(llm_predicted_answers_entities))
     ]
-    question_entity_neighbours = get_entity_one_hop_neighbours(
+    question_entity_neighbours = service.get_entity_one_hop_neighbours(
         question_entity,
         direct_only=False,
         conditions=signature_conditions,
@@ -107,6 +111,7 @@ def find_neighbour_by_signature(
     )
 
     neighbours_score = __score_neighbours_by_signature(
+        service,
         question_entity_neighbours,
         signature_conditions,
         signature_condition_weights
